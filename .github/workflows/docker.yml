@@ -14,21 +14,38 @@ env:
 jobs:
   build-scan:
     runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
 
+    steps:
+      # 1. Récupérer le code source
+      - name: Checkout du dépôt
+        uses: actions/checkout@v4
+
+      # 2. Vérifier le Dockerfile
       - name: Lint du Dockerfile
         uses: hadolint/hadolint-action@v3.1.0
         with:
-          dockerfile: Dockerfile
+          dockerfile: ./Dockerfile
           failure-threshold: warning
 
+      # 3. Construire l'image Docker
       - name: Build de l'image
-        run: docker build --build-arg APP_VERSION=ci -t ${{ env.IMAGE }}:ci .
+        run: |
+          docker build \
+            --build-arg APP_VERSION=ci \
+            -t ${{ env.IMAGE }}:ci .
 
+      # 4. Exécuter les tests Python
       - name: Tests dans le conteneur
         run: docker run --rm ${{ env.IMAGE }}:ci python -m unittest -v
 
+      # 5. Télécharger le template HTML officiel de Trivy
+      - name: Télécharger le template HTML Trivy
+        run: |
+          curl -fsSL \
+            https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/html.tpl \
+            -o html.tpl
+
+      # 6. Générer le rapport JSON
       - name: Rapport Trivy (JSON)
         uses: aquasecurity/trivy-action@v0.36.0
         with:
@@ -37,19 +54,22 @@ jobs:
           output: trivy-report.json
           exit-code: "0"
 
+      # 7. Générer le rapport HTML
       - name: Rapport Trivy (HTML)
         uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: ${{ env.IMAGE }}:ci
           format: template
-          template: "@/contrib/html.tpl"
+          template: "@html.tpl"
           output: trivy-report.html
           exit-code: "0"
 
+      # 8. Afficher le résumé dans GitHub Actions
       - name: Résumé dans la page du run
         if: always()
         run: |
           echo "### Rapport Trivy" >> "$GITHUB_STEP_SUMMARY"
+
           if [ -f trivy-report.json ]; then
             for s in CRITICAL HIGH MEDIUM; do
               n=$(jq "[.Results[]?.Vulnerabilities[]? | select(.Severity==\"$s\")] | length" trivy-report.json)
@@ -59,14 +79,18 @@ jobs:
             echo "Le rapport JSON est indisponible." >> "$GITHUB_STEP_SUMMARY"
           fi
 
+      # 9. Publier les rapports comme artefacts
       - name: Publier les rapports
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: trivy-reports
-          path: trivy-report.*
+          path: |
+            trivy-report.json
+            trivy-report.html
           if-no-files-found: warn
 
+      # 10. Bloquer le pipeline en cas de vulnérabilités graves
       - name: Quality gate (HIGH et CRITICAL)
         uses: aquasecurity/trivy-action@v0.36.0
         with:
