@@ -30,7 +30,7 @@ jobs:
         run: docker run --rm ${{ env.IMAGE }}:ci python -m unittest -v
 
       - name: Rapport Trivy (JSON)
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: ${{ env.IMAGE }}:ci
           format: json
@@ -38,7 +38,7 @@ jobs:
           exit-code: "0"
 
       - name: Rapport Trivy (HTML)
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: ${{ env.IMAGE }}:ci
           format: template
@@ -50,10 +50,14 @@ jobs:
         if: always()
         run: |
           echo "### Rapport Trivy" >> "$GITHUB_STEP_SUMMARY"
-          for s in CRITICAL HIGH MEDIUM; do
-            n=$(jq "[.Results[]?.Vulnerabilities[]? | select(.Severity==\"$s\")] | length" trivy-report.json)
-            echo "- $s : $n" >> "$GITHUB_STEP_SUMMARY"
-          done
+          if [ -f trivy-report.json ]; then
+            for s in CRITICAL HIGH MEDIUM; do
+              n=$(jq "[.Results[]?.Vulnerabilities[]? | select(.Severity==\"$s\")] | length" trivy-report.json)
+              echo "- $s : $n" >> "$GITHUB_STEP_SUMMARY"
+            done
+          else
+            echo "Le rapport JSON est indisponible." >> "$GITHUB_STEP_SUMMARY"
+          fi
 
       - name: Publier les rapports
         if: always()
@@ -61,6 +65,7 @@ jobs:
         with:
           name: trivy-reports
           path: trivy-report.*
+          if-no-files-found: warn
 
       - name: Quality gate (HIGH et CRITICAL)
         uses: aquasecurity/trivy-action@v0.36.0
